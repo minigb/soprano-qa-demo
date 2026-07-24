@@ -1,0 +1,11 @@
+.vscode/
+.DS_Store
+
+# Python cache and local environments
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local runtime output
+*.log

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Soprano Studio</title>
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>Soprano Studio</h1>
+  <nav id="piece-tabs" class="piece-tabs"></nav>
+</header>
+
+<main class="layout">
+  <section class="score-pane">
+    <div class="score-toolbar">
+      <div class="mode-toggle" role="group" aria-label="Score click mode">
+        <button id="mode-play" class="mode-btn active" type="button">▶ Click measure to play</button>
+        <button id="mode-select" class="mode-btn" type="button">🎯 Click measures to select range</button>
+      </div>
+      <label class="follow-toggle">
+        <input type="checkbox" id="follow-playback" checked />
+        Follow playback
+      </label>
+      <button id="reset-btn" class="reset-btn" type="button" title="Clear the measure selection and question, and reset mode">
+        ↺ Reset selection
+      </button>
+    </div>
+    <div id="score-pages" class="score-pages"></div>
+  </section>
+
+  <aside class="side-pane">
+    <div class="player-card">
+      <div class="player-title">
+        <strong id="now-playing-title">—</strong>
+        <span id="now-playing-measure" class="measure-badge"></span>
+      </div>
+      <audio id="audio" controls preload="metadata"></audio>
+    </div>
+
+    <div class="selection-card">
+      <h2>Measure range</h2>
+      <div class="range-inputs">
+        <label>From <input type="number" id="range-from" min="1" /></label>
+        <label>To <input type="number" id="range-to" min="1" /></label>
+        <button id="range-clear" type="button">Clear</button>
+      </div>
+      <button id="play-selection" class="play-selection-btn" type="button" disabled>▶ Play selected measures</button>
+      <p id="range-hint" class="hint"></p>
+    </div>
+
+    <div class="ask-card">
+      <h2>Ask the RAG system</h2>
+      <div class="scope-toggle" role="group" aria-label="Question scope">
+        <label><input type="radio" name="scope" value="whole" checked /> Whole piece</label>
+        <label><input type="radio" name="scope" value="range" /> Selected measure range</label>
+      </div>
+      <textarea id="question" rows="3" placeholder="Ask a question about this piece…"></textarea>
+      <button id="ask-btn" type="button">Ask</button>
+      <div id="ask-status" class="hint"></div>
+    </div>
+
+    <div id="qa-history" class="qa-history"></div>
+  </aside>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
