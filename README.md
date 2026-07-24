@@ -11,10 +11,9 @@ and dataset from sibling repositories instead of copying their code or data.
 
 ```text
 workspace/
-├── soprano-qa/                          RAG + LLM pipeline and local model
-├── soprano-qa-demo/                     this repository
-├── soprano-qa-dataset/                  score, audio, alignment, geometry
-└── soprano-qa-dataset-database-collect/ RAG corpus source checkout
+├── soprano-qa/         RAG + LLM pipeline and local model
+├── soprano-qa-demo/    this repository
+└── soprano-qa-dataset/ score, audio, annotations, and RAG corpus
 ```
 
 Defaults are resolved from the location of this repository, not from the
@@ -24,6 +23,7 @@ shell's current working directory:
 - Score/audio dataset: `../soprano-qa-dataset`
 - Concatenated score assets:
   `../soprano-qa-dataset/sheet_music`
+- RAG corpus source: `../soprano-qa-dataset` on `main`
 - Model and corpus settings: owned by `../soprano-qa`
 
 ## Run
@@ -71,11 +71,11 @@ directory.
 | `SOPRANO_QA_PIPELINE_ROOT` | RAG + LLM repository | `../soprano-qa` |
 | `SOPRANO_QA_DATASET_ROOT` | Score, audio, and alignment repository | `../soprano-qa-dataset` |
 | `SOPRANO_QA_SCORE_ASSET_ROOT` | Concatenated images and geometry | `<dataset>/sheet_music` |
-| `SOPRANO_QA_RAG_DATASET_ROOT` | Pipeline corpus source override | Pipeline setting |
+| `SOPRANO_QA_RAG_DATASET_ROOT` | Pipeline corpus source override | `../soprano-qa-dataset` |
 | `SOPRANO_QA_MODEL_PATH` | Local GGUF checkpoint override | Pipeline setting |
 
-The media dataset and RAG dataset variables are deliberately separate, so a
-demo media override cannot silently replace the corpus source.
+The media and RAG variables remain separate overrides for deployments that
+need them, but both defaults resolve to the same merged dataset repository.
 
 ## Concatenated score assets
 

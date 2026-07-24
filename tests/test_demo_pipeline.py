@@ -31,6 +31,18 @@ class DemoPipelineTests(unittest.TestCase):
             expected_dataset / "sheet_music",
         )
 
+    def test_pipeline_loads_rag_corpus_from_dataset_main_checkout(self) -> None:
+        expected_dataset = (
+            Path(__file__).resolve().parents[2] / "soprano-qa-dataset"
+        ).resolve()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            settings = load_settings(use_legacy_dataset_env=False)
+
+        self.assertEqual(Path(settings["dataset_root"]), expected_dataset)
+        self.assertTrue(
+            (expected_dataset / "database" / "exports" / "research-open.jsonl").is_file()
+        )
+
     def test_demo_does_not_vendor_pipeline_or_dataset_artifacts(self) -> None:
         demo_root = Path(__file__).resolve().parents[1]
         for pipeline_or_data_directory in (
