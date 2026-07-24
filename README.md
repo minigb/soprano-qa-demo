@@ -11,27 +11,27 @@ and dataset from sibling repositories instead of copying their code or data.
 
 ```text
 workspace/
-├── soprano-qa/         RAG + LLM pipeline and local model
-├── soprano-qa-demo/    this repository
-└── soprano-qa-dataset/ score, audio, annotations, and RAG corpus
+├── soprano-qa-rag-system/ RAG + LLM pipeline and local model
+├── soprano-qa-demo/       this repository
+└── soprano-qa-dataset/    score, audio, annotations, and RAG corpus
 ```
 
 Defaults are resolved from the location of this repository, not from the
 shell's current working directory:
 
-- Pipeline: `../soprano-qa`
+- Pipeline: `../soprano-qa-rag-system`
 - Score/audio dataset: `../soprano-qa-dataset`
 - Concatenated score assets:
   `../soprano-qa-dataset/sheet_music`
 - RAG corpus source: `../soprano-qa-dataset` on `main`
-- Model and corpus settings: owned by `../soprano-qa`
+- Model and corpus settings: owned by `../soprano-qa-rag-system`
 
 ## Run
 
 Install the pipeline dependencies and download its model once:
 
 ```bash
-cd ../soprano-qa
+cd ../soprano-qa-rag-system
 conda run -n soprano-qa python -m pip install -r requirements.txt \
   --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 conda run -n soprano-qa python scripts/download_model.py
@@ -55,7 +55,7 @@ conda run -n soprano-qa python /path/to/soprano-qa-demo/server.py \
 ```
 
 The Qwen checkpoint is read from
-`../soprano-qa/models/Qwen3-8B-Q4_K_M.gguf`. If the model or
+`../soprano-qa-rag-system/models/Qwen3-8B-Q4_K_M.gguf`. If the model or
 `llama-cpp-python` is unavailable, corpus hits still use an extractive
 fallback and the UI labels model-unavailable responses explicitly.
 
@@ -68,7 +68,7 @@ directory.
 
 | Environment variable | Purpose | Default |
 | --- | --- | --- |
-| `SOPRANO_QA_PIPELINE_ROOT` | RAG + LLM repository | `../soprano-qa` |
+| `SOPRANO_QA_PIPELINE_ROOT` | RAG + LLM repository | `../soprano-qa-rag-system` |
 | `SOPRANO_QA_DATASET_ROOT` | Score, audio, and alignment repository | `../soprano-qa-dataset` |
 | `SOPRANO_QA_SCORE_ASSET_ROOT` | Concatenated images and geometry | `<dataset>/sheet_music` |
 | `SOPRANO_QA_RAG_DATASET_ROOT` | Pipeline corpus source override | `../soprano-qa-dataset` |
@@ -102,7 +102,7 @@ coordinates.
 ## QA behavior
 
 The web adapter imports the public service facade from
-`../soprano-qa/soprano_qa/service.py`.
+`../soprano-qa-rag-system/soprano_qa/service.py`.
 
 - Corpus-backed answers retain exact evidence IDs, measure routing, and source
   and rights notices.
@@ -124,7 +124,7 @@ python3 -m unittest discover -v
 Run the pipeline's own tests separately:
 
 ```bash
-python3 -m unittest discover -v -s ../soprano-qa/tests
+python3 -m unittest discover -v -s ../soprano-qa-rag-system/tests
 ```
 
 ## Layout

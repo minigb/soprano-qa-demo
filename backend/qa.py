@@ -18,7 +18,7 @@ def _external_root(env_name: str, default: Path) -> Path:
 
 PIPELINE_ROOT = _external_root(
     "SOPRANO_QA_PIPELINE_ROOT",
-    PROJECT_ROOT.parent / "soprano-qa",
+    PROJECT_ROOT.parent / "soprano-qa-rag-system",
 )
 if not (PIPELINE_ROOT / "soprano_qa" / "__init__.py").is_file():
     raise RuntimeError(

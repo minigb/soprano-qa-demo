@@ -19,7 +19,7 @@ class DemoPipelineTests(unittest.TestCase):
     def test_adapter_loads_pipeline_from_sibling_repository(self) -> None:
         self.assertEqual(
             qa_adapter.PIPELINE_ROOT,
-            Path(__file__).resolve().parents[2] / "soprano-qa",
+            Path(__file__).resolve().parents[2] / "soprano-qa-rag-system",
         )
         self.assertTrue(Path(qa.__file__).is_relative_to(qa_adapter.PIPELINE_ROOT))
 
