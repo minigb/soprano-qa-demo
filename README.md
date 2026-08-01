@@ -1,11 +1,28 @@
 # Soprano Studio
 
-Web demo with synchronized audio, a vertically scrollable score, measure-range
-selection, and answers from the sibling Soprano QA RAG system.
+Soprano Studio is a local web demo for exploring five soprano works. It pairs
+audio with a scrollable score, supports measure-range selection, and sends
+questions to the measure-aware Soprano QA RAG and local-LLM pipeline.
 
-## Setup
+This repository contains only the web application. It reads media and score
+data from `soprano-qa-dataset` and imports the question-answering service from
+`soprano-qa-rag-system` at runtime.
 
-### 1. Clone the three repositories
+Answers show their cited evidence and source notices. When the corpus has no
+answer, any model-only response is labeled as internal knowledge.
+
+## Requirements
+
+Keep these repositories as immediate siblings with their default names:
+
+```text
+soprano-qa-workspace/
+├── soprano-qa-dataset/
+├── soprano-qa-rag-system/
+└── soprano-qa-demo/
+```
+
+Clone them if needed:
 
 ```bash
 mkdir soprano-qa-workspace
@@ -15,19 +32,8 @@ git clone https://github.com/minigb/soprano-qa-rag-system.git
 git clone https://github.com/minigb/soprano-qa-demo.git
 ```
 
-Keep them as immediate siblings:
-
-```text
-soprano-qa-workspace/
-├── soprano-qa-dataset/
-├── soprano-qa-rag-system/
-└── soprano-qa-demo/
-```
-
-### 2. Create the one shared environment
-
-Install Conda (Miniconda or Miniforge) and initialize it for your shell first.
-Run these commands from `soprano-qa-workspace/`:
+Create the shared Conda environment from the dataset repository, then install
+the RAG dependencies:
 
 ```bash
 cd soprano-qa-dataset
@@ -36,102 +42,65 @@ conda activate soprano-qa
 
 cd ../soprano-qa-rag-system
 python -m pip install -r requirements.txt
-```
-
-If the environment already exists, run this alternative block from
-`soprano-qa-workspace/`:
-
-```bash
-cd soprano-qa-dataset
-conda env update -n soprano-qa -f environment.yml
-conda activate soprano-qa
-cd ../soprano-qa-rag-system
-python -m pip install -r requirements.txt
-```
-
-For NVIDIA CUDA 12.4, replace the `pip install` command in the chosen block
-with:
-
-```bash
-python -m pip install -r requirements.txt \
-  --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
-```
-
-### 3. Prepare the corpus and optionally the model
-
-From `soprano-qa-rag-system`:
-
-```bash
 python scripts/build_corpus.py
-python scripts/download_model.py  # Optional; needed for generated answers
 ```
 
-The explicit corpus build is useful for validating the data before starting
-the demo, but it is not required after every annotation or database edit. The
-RAG service fingerprints the active
-`soprano-qa-dataset/expert_curation/review/*.json` files, the
-`soprano-qa-dataset/database/records/*.jsonl` files, and the configured
-`soprano-qa-dataset/database/exports/*.jsonl` files. When those inputs change,
-the next corpus check rebuilds the local RAG snapshot and reloads it
-automatically. There is no annotation or database copy inside the demo
-repository.
+If the environment already exists, replace `conda env create` with:
 
-All expert knowledge units remain retrievable so that uncertain but valuable
-human evidence is not discarded. The pipeline attaches a review warning to a
-`needs_review` unit, allowing the answer generator and evaluator to treat it
-conservatively. All current measure statuses have been reviewed as `specific`,
-`whole_piece`, or `unspecified`; original source annotations provide provenance
-and fidelity context rather than acting as separate retrieval records.
+```bash
+conda env update -n soprano-qa -f environment.yml
+```
 
-The model download needs approximately 5 GB. Without it, corpus-backed
-extractive answers remain available but local generation is unavailable.
+Generated answers require the optional local model:
 
-### 4. Run the demo
+```bash
+python scripts/download_model.py
+```
+
+Without the model, the demo remains usable and returns corpus-backed
+extractive answers. See the
+[RAG system README](https://github.com/minigb/soprano-qa-rag-system) for
+platform-specific model installation and pipeline usage.
+
+## Run
+
+From `soprano-qa-rag-system`, launch the server with the shared environment
+explicitly so that local LLM support is available:
 
 ```bash
 cd ../soprano-qa-demo
-python server.py --host 127.0.0.1 --port 8765
+conda run --no-capture-output -n soprano-qa \
+  python server.py --host 127.0.0.1 --port 8765
 ```
 
-Open <http://127.0.0.1:8765>.
+Open <http://127.0.0.1:8765/> and keep the server terminal running.
 
-## Verify
+Restart the server after changing demo or RAG Python code, settings, or model
+configuration. Dataset evidence changes are detected and reloaded
+automatically.
 
-From `soprano-qa-workspace/`:
+## Test
+
+From `soprano-qa-demo`:
 
 ```bash
-cd soprano-qa-demo
-conda run -n soprano-qa python -m unittest discover -v
-
-cd ../soprano-qa-rag-system
-conda run -n soprano-qa python -m unittest discover -v
+conda run --no-capture-output -n soprano-qa \
+  python -m unittest discover -v
 ```
 
 ## Configuration
 
-Paths are resolved from the repositories, not from the launch directory.
+The sibling layout works without environment variables. Custom layouts can
+override these paths:
 
-| Environment variable | Default |
+| Variable | Purpose |
 | --- | --- |
-| `SOPRANO_QA_PIPELINE_ROOT` | `../soprano-qa-rag-system` |
-| `SOPRANO_QA_DATASET_ROOT` | `../soprano-qa-dataset` |
-| `SOPRANO_QA_SCORE_ASSET_ROOT` | `<dataset>/sheet_music` |
-| `SOPRANO_QA_RAG_DATASET_ROOT` | `../soprano-qa-dataset` |
-| `SOPRANO_QA_MODEL_PATH` | Pipeline setting |
+| `SOPRANO_QA_PIPELINE_ROOT` | RAG system repository |
+| `SOPRANO_QA_DATASET_ROOT` | Dataset used for demo media and score assets |
+| `SOPRANO_QA_RAG_DATASET_ROOT` | Dataset used to build the RAG corpus |
+| `SOPRANO_QA_MODEL_PATH` | Local GGUF model checkpoint |
 
-## Project notes
-
-The demo repository contains only the HTTP server, pipeline/dataset adapters,
-frontend, and integration tests. Score, audio, geometry, corpus, retrieval, and
-model files remain in their owning sibling repositories.
-
-Concatenated score assets are already committed to the dataset. To regenerate
-them in the shared environment, run this from `soprano-qa-workspace/`:
-
-```bash
-cd soprano-qa-dataset
-python sheet_music/build_concatenated_scores.py
-```
-
-Corpus-backed responses retain evidence and rights metadata. Questions outside
-the corpus can use the model's internal knowledge and are labeled accordingly.
+When overriding the dataset location, point both dataset variables at the same
+checkout. Additional pipeline settings belong to `soprano-qa-rag-system`;
+dataset and score tooling belong to
+[soprano-qa-dataset](https://github.com/minigb/soprano-qa-dataset).
