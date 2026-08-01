@@ -14,6 +14,10 @@ from soprano_qa.settings import load_settings
 
 qa = qa_adapter.SERVICE
 
+MOOD_QUERY = "28마디부터 분위기 변화를 어떻게 표현해야 하나요?"
+MOOD_UNIT_ID = "die-forelle-ku-010"
+SECOND_BEAT_ACCENT_UNIT_ID = "die-forelle-ku-002"
+
 
 class DemoPipelineTests(unittest.TestCase):
     def test_adapter_loads_pipeline_from_sibling_repository(self) -> None:
@@ -31,7 +35,9 @@ class DemoPipelineTests(unittest.TestCase):
             expected_dataset / "sheet_music",
         )
 
-    def test_pipeline_loads_rag_corpus_from_dataset_main_checkout(self) -> None:
+    def test_pipeline_loads_active_review_and_web_data_from_dataset_main_checkout(
+        self,
+    ) -> None:
         expected_dataset = (
             Path(__file__).resolve().parents[2] / "soprano-qa-dataset"
         ).resolve()
@@ -41,6 +47,17 @@ class DemoPipelineTests(unittest.TestCase):
         self.assertEqual(Path(settings["dataset_root"]), expected_dataset)
         self.assertTrue(
             (expected_dataset / "database" / "exports" / "research-open.jsonl").is_file()
+        )
+        review_root = expected_dataset / "expert_curation" / "review"
+        self.assertEqual(
+            {path.stem for path in review_root.glob("*.json")},
+            {
+                "die-forelle",
+                "in-flowery-clouds",
+                "la-capinera",
+                "nella-fantasia",
+                "una-voce-poco-fa",
+            },
         )
 
     def test_demo_does_not_vendor_pipeline_or_dataset_artifacts(self) -> None:
@@ -74,7 +91,7 @@ class DemoPipelineTests(unittest.TestCase):
     def test_measure_query_uses_pipeline_scope_and_ids(self) -> None:
         result = qa.ask(
             piece_id="die-forelle",
-            question="28마디부터 분위기 변화를 어떻게 표현해야 하나요?",
+            question=MOOD_QUERY,
             measure_range=(28, 30),
             generate=False,
         )
@@ -82,14 +99,24 @@ class DemoPipelineTests(unittest.TestCase):
         self.assertEqual(result["pipeline"], "soprano_qa")
         self.assertEqual(result["generation_mode"], "extractive")
         self.assertEqual(result["answer_basis"], "retrieval_extractive")
-        self.assertEqual(result["evidence"][0]["id"], "sqa-0058")
+        self.assertEqual(result["evidence"][0]["id"], MOOD_UNIT_ID)
+        self.assertEqual(
+            result["evidence"][0]["text"],
+            (
+                "피아노 파트에서 바뀌는 음형은 낚시꾼이 물을 흐트러뜨리며 "
+                "물고기를 잡는 모습을 그려, 곡의 내용과 밀접하게 연결된 "
+                "긴장감과 분위기 전환을 만든다. 노래하는 사람은 이를 이해하고 "
+                "피아노가 만드는 긴장감을 이용해 가사를 표현하며, 전환이 "
+                "느껴지도록 주의해서 부르는 것이 좋다."
+            ),
+        )
         self.assertEqual(
             result["evidence"][0]["scope_match"],
             "overlaps_query_range",
         )
-        self.assertIn("[sqa-0058]", result["answer"])
+        self.assertIn(f"[{MOOD_UNIT_ID}]", result["answer"])
 
-    def test_korean_paraphrase_retrieves_second_beat_accent_answer(self) -> None:
+    def test_korean_query_retrieves_reviewed_second_beat_accent_unit(self) -> None:
         result = qa.ask(
             piece_id="die-forelle",
             question="피아노 반주에서 두 번째 박의 악센트는 무엇을 나타내는가?",
@@ -97,7 +124,7 @@ class DemoPipelineTests(unittest.TestCase):
             generate=False,
         )
 
-        self.assertEqual(result["evidence"][0]["id"], "sqa-0057")
+        self.assertEqual(result["evidence"][0]["id"], SECOND_BEAT_ACCENT_UNIT_ID)
         self.assertIn("송어가 뛰어노는 모습", result["answer"])
 
     def test_generation_runs_context_and_citation_pipeline(self) -> None:
@@ -116,7 +143,7 @@ class DemoPipelineTests(unittest.TestCase):
         ):
             result = qa.ask(
                 piece_id="die-forelle",
-                question="28마디부터 분위기 변화를 어떻게 표현해야 하나요?",
+                question=MOOD_QUERY,
                 measure_range=(28, 30),
                 generate=True,
             )
@@ -124,7 +151,7 @@ class DemoPipelineTests(unittest.TestCase):
         generate.assert_called_once()
         self.assertEqual(result["generation_mode"], "llm")
         self.assertEqual(result["answer_basis"], "retrieved_evidence")
-        self.assertIn("[sqa-0058]", result["answer"])
+        self.assertIn(f"[{MOOD_UNIT_ID}]", result["answer"])
         self.assertNotIn("[E1]", result["answer"])
 
     def test_no_hit_uses_separate_internal_knowledge_prompt(self) -> None:
@@ -140,7 +167,8 @@ class DemoPipelineTests(unittest.TestCase):
                 "generate_llm",
                 return_value=(
                     "일반 음악 지식으로 답한 내용입니다. "
-                    "[E1; sqa-0001] [sqa-0001, sqa-0002] "
+                    "[E1; die-forelle-ku-001] "
+                    "[die-forelle-ku-001, die-forelle-ku-002] "
                     "[출처: E2] 【Evidence 3】 "
                     "[webchunk-a, webchunk-b] "
                     "현재 답변 가능 자료에서 이 질문을 뒷받침할 근거를 찾지 못했습니다."
@@ -164,7 +192,7 @@ class DemoPipelineTests(unittest.TestCase):
         self.assertEqual(result["evidence_notices"], [])
         self.assertIn("일반 음악 지식", result["answer"])
         self.assertNotIn("[E1]", result["answer"])
-        self.assertNotIn("sqa-", result["answer"])
+        self.assertNotIn("die-forelle-ku-", result["answer"])
         self.assertNotIn("webchunk-", result["answer"])
         self.assertNotIn("Evidence", result["answer"])
         self.assertNotIn(
@@ -172,7 +200,9 @@ class DemoPipelineTests(unittest.TestCase):
             result["answer"],
         )
 
-    def test_grounded_refusal_retries_with_internal_knowledge(self) -> None:
+    def test_grounded_refusal_preserves_retrieved_extractive_evidence(
+        self,
+    ) -> None:
         available = {
             "path": "/tmp/model.gguf",
             "checkpoint_exists": True,
@@ -183,25 +213,28 @@ class DemoPipelineTests(unittest.TestCase):
             mock.patch.object(
                 qa,
                 "generate_llm",
-                side_effect=[
-                    "현재 답변 가능 자료에서 이 질문을 뒷받침할 근거를 찾지 못했습니다.",
-                    "일반 지식으로는 빠른 반주가 생동감과 추진력을 줄 수 있습니다.",
-                ],
+                return_value=(
+                    "현재 답변 가능 자료에서 이 질문을 뒷받침할 "
+                    "근거를 찾지 못했습니다."
+                ),
             ) as generate,
         ):
             result = qa.ask(
                 piece_id="die-forelle",
-                question="슈베르트는 왜 반주를 빠르게 연주했나요?",
-                measure_range=None,
+                question=MOOD_QUERY,
+                measure_range=(28, 30),
                 generate=True,
             )
 
-        self.assertEqual(generate.call_count, 2)
-        self.assertIn("Retrieved evidence", generate.call_args_list[0].args[1][1]["content"])
-        self.assertNotIn("Retrieved evidence", generate.call_args_list[1].args[1][1]["content"])
-        self.assertEqual(result["answer_basis"], "internal_knowledge")
-        self.assertEqual(result["evidence"], [])
-        self.assertIn("생동감과 추진력", result["answer"])
+        generate.assert_called_once()
+        self.assertIn(
+            "Retrieved evidence",
+            generate.call_args.args[1][1]["content"],
+        )
+        self.assertEqual(result["generation_mode"], "extractive")
+        self.assertEqual(result["answer_basis"], "retrieval_extractive")
+        self.assertTrue(result["evidence"])
+        self.assertIn(f"[{MOOD_UNIT_ID}]", result["answer"])
         self.assertNotIn("현재 답변 가능 자료에서", result["answer"])
 
     def test_grounded_secondary_limitation_does_not_trigger_internal_retry(self) -> None:
@@ -223,7 +256,7 @@ class DemoPipelineTests(unittest.TestCase):
         ):
             result = qa.ask(
                 piece_id="die-forelle",
-                question="28마디부터 분위기 변화를 어떻게 표현해야 하나요?",
+                question=MOOD_QUERY,
                 measure_range=(28, 30),
                 generate=True,
             )
@@ -231,7 +264,7 @@ class DemoPipelineTests(unittest.TestCase):
         generate.assert_called_once()
         self.assertEqual(result["answer_basis"], "retrieved_evidence")
         self.assertTrue(result["evidence"])
-        self.assertIn("[sqa-0058]", result["answer"])
+        self.assertIn(f"[{MOOD_UNIT_ID}]", result["answer"])
 
     def test_empty_internal_answer_is_classified_as_unavailable(self) -> None:
         available = {
@@ -325,7 +358,7 @@ class DemoPipelineTests(unittest.TestCase):
         ):
             result = qa.ask(
                 piece_id="die-forelle",
-                question="28마디부터 분위기 변화를 어떻게 표현해야 하나요?",
+                question=MOOD_QUERY,
                 measure_range=(28, 30),
                 generate=True,
                 top_k=2,
@@ -350,7 +383,7 @@ class DemoPipelineTests(unittest.TestCase):
         ):
             result = qa.ask(
                 piece_id="die-forelle",
-                question="28마디부터 분위기 변화를 어떻게 표현해야 하나요?",
+                question=MOOD_QUERY,
                 measure_range=(28, 30),
                 generate=True,
             )
@@ -361,7 +394,7 @@ class DemoPipelineTests(unittest.TestCase):
             result["generation_fallback_reason"],
             "llama-cpp-python is unavailable",
         )
-        self.assertIn("[sqa-0058]", result["answer"])
+        self.assertIn(f"[{MOOD_UNIT_ID}]", result["answer"])
 
     def test_concurrent_generation_is_serialized(self) -> None:
         available = {
@@ -386,7 +419,7 @@ class DemoPipelineTests(unittest.TestCase):
         def ask_once() -> dict:
             return qa.ask(
                 piece_id="die-forelle",
-                question="28마디부터 분위기 변화를 어떻게 표현해야 하나요?",
+                question=MOOD_QUERY,
                 measure_range=(28, 30),
                 generate=True,
             )
@@ -421,8 +454,23 @@ class DemoPipelineTests(unittest.TestCase):
     def test_corpus_stats_come_from_pipeline_snapshot(self) -> None:
         stats = qa.corpus_stats()
         self.assertEqual(stats["pipeline"], "soprano_qa")
-        self.assertEqual(stats["total_records"], 211)
-        self.assertEqual(stats["retrievable_records"], 210)
+        self.assertEqual(stats["corpus_schema_version"], 6)
+        self.assertEqual(stats["total_records"], 223)
+        self.assertEqual(stats["retrievable_records"], 223)
+        self.assertEqual(
+            stats["records_by_evidence_type"],
+            {
+                "expert_annotation": 122,
+                "web_database": 101,
+            },
+        )
+        self.assertEqual(stats["excluded_from_retrieval"], [])
+        self.assertEqual(
+            stats["expert_records_by_retrieval_review_warning"],
+            {
+                "rewrite_review_pending": 13,
+            },
+        )
 
 
 if __name__ == "__main__":

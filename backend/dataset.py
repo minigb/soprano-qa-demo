@@ -39,10 +39,10 @@ _CACHE_TTL_SECONDS = 5.0
 
 PIECE_IDS = [
     "die-forelle",
-    "in-flowery-clouds",
-    "la-capinera",
-    "nella-fantasia",
     "una-voce-poco-fa",
+    "la-capinera",
+    "in-flowery-clouds",
+    "nella-fantasia",
 ]
 
 # Escape hatch for a piece whose alignment flags its score-to-audio mapping

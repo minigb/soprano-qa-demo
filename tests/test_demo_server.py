@@ -9,6 +9,10 @@ from urllib.request import Request, urlopen
 
 from server import Handler, ThreadingHTTPServer
 
+MOOD_QUERY = "28마디부터 분위기 변화를 어떻게 표현해야 하나요?"
+MOOD_UNIT_ID = "die-forelle-ku-010"
+SECOND_BEAT_ACCENT_UNIT_ID = "die-forelle-ku-002"
+
 
 class QuietHandler(Handler):
     def log_message(self, fmt, *args) -> None:
@@ -69,9 +73,7 @@ class DemoServerTests(unittest.TestCase):
             json.dumps(
                 {
                     "piece_id": "die-forelle",
-                    "question": (
-                        "28마디부터 분위기 변화를 어떻게 표현해야 하나요?"
-                    ),
+                    "question": MOOD_QUERY,
                     "measure_range": [28, 30],
                     "generate": False,
                 }
@@ -80,9 +82,9 @@ class DemoServerTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(result["pipeline"], "soprano_qa")
-        self.assertEqual(result["evidence"][0]["id"], "sqa-0058")
+        self.assertEqual(result["evidence"][0]["id"], MOOD_UNIT_ID)
 
-    def test_http_endpoint_retrieves_second_beat_accent_paraphrase(self) -> None:
+    def test_http_endpoint_retrieves_reviewed_second_beat_accent_unit(self) -> None:
         status, result = self.post_raw(
             json.dumps(
                 {
@@ -97,7 +99,7 @@ class DemoServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(result["evidence"][0]["id"], "sqa-0057")
+        self.assertEqual(result["evidence"][0]["id"], SECOND_BEAT_ACCENT_UNIT_ID)
         self.assertIn("송어가 뛰어노는 모습", result["answer"])
 
 

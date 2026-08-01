@@ -66,6 +66,23 @@ python scripts/build_corpus.py
 python scripts/download_model.py  # Optional; needed for generated answers
 ```
 
+The explicit corpus build is useful for validating the data before starting
+the demo, but it is not required after every annotation or database edit. The
+RAG service fingerprints the active
+`soprano-qa-dataset/expert_curation/review/*.json` files, the
+`soprano-qa-dataset/database/records/*.jsonl` files, and the configured
+`soprano-qa-dataset/database/exports/*.jsonl` files. When those inputs change,
+the next corpus check rebuilds the local RAG snapshot and reloads it
+automatically. There is no annotation or database copy inside the demo
+repository.
+
+All expert knowledge units remain retrievable so that uncertain but valuable
+human evidence is not discarded. The pipeline attaches a review warning to a
+`needs_review` unit, allowing the answer generator and evaluator to treat it
+conservatively. All current measure statuses have been reviewed as `specific`,
+`whole_piece`, or `unspecified`; original source annotations provide provenance
+and fidelity context rather than acting as separate retrieval records.
+
 The model download needs approximately 5 GB. Without it, corpus-backed
 extractive answers remain available but local generation is unavailable.
 
