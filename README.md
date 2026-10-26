@@ -1,9 +1,5 @@
 # Soprano Lab
 
-> **Moved.** This repository is archived. Its code and full history now live in
-> [`demo/`](https://github.com/minigb/soprano-lab/tree/main/demo) of
-> [minigb/soprano-lab](https://github.com/minigb/soprano-lab).
-
 Soprano Lab is a local web demo for exploring five soprano works. It pairs
 audio with a scrollable score, supports measure-range selection, and sends
 questions to the measure-aware Soprano QA RAG and local-LLM pipeline.
