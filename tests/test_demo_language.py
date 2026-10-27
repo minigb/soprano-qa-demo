@@ -154,6 +154,11 @@ class StaticUiLabelTests(unittest.TestCase):
         )
         self.assertIn("Web / lesson video (not expert-curated)", script)
 
+    def test_ui_labels_professional_soprano_apart_from_experts(self) -> None:
+        script = (server.STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+        self.assertRegex(script, r'ev\.kind === "sumijo"\s*\?\s*"Professional Soprano"')
+        self.assertRegex(script, r'ev\.kind === "expert"\s*\?\s*"Expert annotation"')
+
 
 if __name__ == "__main__":
     unittest.main()
