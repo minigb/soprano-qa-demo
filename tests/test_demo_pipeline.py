@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 import threading
 import time
@@ -11,7 +12,6 @@ from pathlib import Path
 
 from backend import dataset, qa as qa_adapter
 from soprano_qa import llm as llm_module
-from soprano_qa.answer import GeneratedAnswerRejected
 from soprano_qa.llm import GenerationBackendUnavailable
 from soprano_qa.settings import load_settings
 
@@ -187,9 +187,13 @@ class DemoPipelineTests(unittest.TestCase):
         )
         generate.assert_called_once()
         prompt = generate.call_args.args[1][1]["content"]
-        self.assertIn("Retrieved evidence", prompt)
-        self.assertIn("[E1]", prompt)
-        self.assertIn("긴장감과 분위기 전환", prompt)
+        # The question and evidence travel as JSON data, and the same bundle
+        # is handed to the backend's admission and output guards.
+        payload = json.loads(prompt)
+        self.assertEqual(generate.call_args.kwargs["security_context"], payload)
+        first_evidence = payload["Retrieved evidence"][0]
+        self.assertEqual(first_evidence["citation_label"], "E1")
+        self.assertIn("긴장감과 분위기 전환", first_evidence["answer"])
         self.assertIn(MOOD_LYRIC, prompt)
         self.assertEqual(result["generation_mode"], "llm")
         self.assertEqual(result["answer_basis"], "retrieved_evidence")
@@ -247,25 +251,34 @@ class DemoPipelineTests(unittest.TestCase):
             qa.NO_CORPUS_EVIDENCE_MESSAGE,
         )
 
+    def assertDraftWithheld(self, result: dict) -> None:
+        # A rejected draft comes back as the fixed refusal with no evidence.
+        self.assertEqual(result["generation_mode"], "unavailable")
+        self.assertEqual(result["unavailable_reason"], "answer_validation_failed")
+        self.assertEqual(result["answer"], qa.NO_CORPUS_EVIDENCE_MESSAGE)
+        self.assertEqual(result["evidence"], [])
+
     def test_grounded_refusal_is_rejected_not_displayed(self) -> None:
+        refusal = "제공된 근거만으로는 이 질문에 정확히 답변할 수 없습니다."
         with mock.patch.object(
             qa,
             "generate_llm",
-            return_value="제공된 근거만으로는 이 질문에 정확히 답변할 수 없습니다.",
+            return_value=refusal,
         ) as generate:
-            with self.assertRaises(GeneratedAnswerRejected):
-                qa.ask(
-                    piece_id="die-forelle",
-                    question=MOOD_QUERY,
-                    measure_range=(28, 30),
-                    generate=True,
-                )
+            result = qa.ask(
+                piece_id="die-forelle",
+                question=MOOD_QUERY,
+                measure_range=(28, 30),
+                generate=True,
+            )
 
         generate.assert_called_once()
         self.assertIn(
             "Retrieved evidence",
             generate.call_args.args[1][1]["content"],
         )
+        self.assertDraftWithheld(result)
+        self.assertNotIn(refusal, result["answer"])
 
     def test_empty_grounded_draft_is_rejected(self) -> None:
         with mock.patch.object(
@@ -273,15 +286,15 @@ class DemoPipelineTests(unittest.TestCase):
             "generate_llm",
             return_value=" \n\t",
         ) as generate:
-            with self.assertRaises(GeneratedAnswerRejected):
-                qa.ask(
-                    piece_id="die-forelle",
-                    question=MOOD_QUERY,
-                    measure_range=(28, 30),
-                    generate=True,
-                )
+            result = qa.ask(
+                piece_id="die-forelle",
+                question=MOOD_QUERY,
+                measure_range=(28, 30),
+                generate=True,
+            )
 
         generate.assert_called_once()
+        self.assertDraftWithheld(result)
 
     def test_grounded_secondary_limitation_does_not_trigger_internal_retry(self) -> None:
         with mock.patch.object(
@@ -368,11 +381,13 @@ class DemoPipelineTests(unittest.TestCase):
         generate.assert_called_once()
 
     def test_concurrent_generation_is_serialized(self) -> None:
-        # Exercise the pipeline's real generate() and its inference lock;
-        # only the llama.cpp model object is replaced.
+        # Exercise the pipeline's real generate(), with its admission and
+        # output guards, and its inference lock; only the llama.cpp model
+        # object is replaced. Each completion holds the lock on its own.
         counter_lock = threading.Lock()
         active = 0
         peak = 0
+        completions = {"answer": 0, "guard": 0}
 
         class FakeLlama:
             def create_chat_completion(self, **kwargs) -> dict:
@@ -381,13 +396,21 @@ class DemoPipelineTests(unittest.TestCase):
                     active += 1
                     peak = max(peak, active)
                 time.sleep(0.03)
+                # Only the answer composition is constrained by a JSON schema;
+                # the guards return a bare verdict.
+                kind = "answer" if "response_format" in kwargs else "guard"
                 with counter_lock:
                     active -= 1
-                return {
-                    "choices": [
-                        {"message": {"content": f"{GROUNDED_ANSWER} [E1]"}}
-                    ]
-                }
+                    completions[kind] += 1
+                content = (
+                    json.dumps(
+                        {"sentences": [{"text": GROUNDED_ANSWER, "evidence": ["E1"]}]},
+                        ensure_ascii=False,
+                    )
+                    if kind == "answer"
+                    else '{"allow": true}'
+                )
+                return {"choices": [{"message": {"content": content}}]}
 
         def ask_once() -> dict:
             return qa.ask(
@@ -404,6 +427,7 @@ class DemoPipelineTests(unittest.TestCase):
             results = list(executor.map(lambda _: ask_once(), range(2)))
 
         self.assertEqual(peak, 1)
+        self.assertEqual(completions, {"answer": 2, "guard": 4})
         self.assertTrue(
             all(result["generation_mode"] == "llm" for result in results)
         )
@@ -426,12 +450,13 @@ class DemoPipelineTests(unittest.TestCase):
     def test_corpus_stats_come_from_pipeline_snapshot(self) -> None:
         stats = qa.corpus_stats()
         self.assertEqual(stats["pipeline"], "soprano_qa")
-        self.assertEqual(stats["corpus_schema_version"], 8)
-        self.assertEqual(stats["total_records"], 946)
+        self.assertEqual(stats["corpus_schema_version"], 9)
+        self.assertEqual(stats["total_records"], 953)
         self.assertEqual(
             stats["records_by_evidence_type"],
             {
                 "expert_annotation": 122,
+                "sumijo_feedback": 7,
                 "web_coaching": 723,
                 "web_database": 101,
             },
