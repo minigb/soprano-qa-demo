@@ -774,7 +774,9 @@ function renderQAItem(question, result) {
     const isWebCoaching = ev.evidence_type === "web_coaching";
     if (isWebCoaching) evEl.classList.add("web-coaching");
     const kindLabel =
-      ev.kind === "expert"
+      ev.kind === "sumijo"
+        ? "Professional Soprano"
+        : ev.kind === "expert"
         ? "Expert annotation"
         : isWebCoaching
         ? WEB_COACHING_LABEL
