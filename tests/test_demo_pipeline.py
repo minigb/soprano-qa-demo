@@ -13,6 +13,7 @@ from pathlib import Path
 from backend import dataset, qa as qa_adapter
 from soprano_qa import llm as llm_module
 from soprano_qa.llm import GenerationBackendUnavailable
+from soprano_qa.response_policy import failure_guidance
 from soprano_qa.settings import load_settings
 
 qa = qa_adapter.SERVICE
@@ -252,11 +253,21 @@ class DemoPipelineTests(unittest.TestCase):
         )
 
     def assertDraftWithheld(self, result: dict) -> None:
-        # A rejected draft comes back as the fixed refusal with no evidence.
-        self.assertEqual(result["generation_mode"], "unavailable")
+        # When the grounded draft and the general-knowledge retry both fail,
+        # the service returns its retry guidance with no evidence.
+        self.assertEqual(result["generation_mode"], "response_error")
         self.assertEqual(result["unavailable_reason"], "answer_validation_failed")
-        self.assertEqual(result["answer"], qa.NO_CORPUS_EVIDENCE_MESSAGE)
+        self.assertEqual(result["answer"], failure_guidance("ko"))
         self.assertEqual(result["evidence"], [])
+
+    def assertGeneralRetryAfterGroundedDraft(self, generate: mock.Mock) -> None:
+        # A rejected grounded draft gets one general-knowledge attempt,
+        # which is given no sources.
+        self.assertEqual(generate.call_count, 2)
+        grounded, general = generate.call_args_list
+        self.assertIn("Retrieved evidence", grounded.args[1][1]["content"])
+        self.assertIs(general.kwargs.get("general_answer_fallback"), True)
+        self.assertIn('"Retrieved evidence": []', general.args[1][1]["content"])
 
     def test_grounded_refusal_is_rejected_not_displayed(self) -> None:
         refusal = "제공된 근거만으로는 이 질문에 정확히 답변할 수 없습니다."
@@ -272,11 +283,7 @@ class DemoPipelineTests(unittest.TestCase):
                 generate=True,
             )
 
-        generate.assert_called_once()
-        self.assertIn(
-            "Retrieved evidence",
-            generate.call_args.args[1][1]["content"],
-        )
+        self.assertGeneralRetryAfterGroundedDraft(generate)
         self.assertDraftWithheld(result)
         self.assertNotIn(refusal, result["answer"])
 
@@ -293,7 +300,7 @@ class DemoPipelineTests(unittest.TestCase):
                 generate=True,
             )
 
-        generate.assert_called_once()
+        self.assertGeneralRetryAfterGroundedDraft(generate)
         self.assertDraftWithheld(result)
 
     def test_grounded_secondary_limitation_does_not_trigger_internal_retry(self) -> None:
@@ -387,7 +394,15 @@ class DemoPipelineTests(unittest.TestCase):
         counter_lock = threading.Lock()
         active = 0
         peak = 0
-        completions = {"answer": 0, "guard": 0}
+        completions = {"admission": 0, "answer": 0, "guard": 0}
+        replies = {
+            "admission": '{"task": "music_question"}',
+            "answer": json.dumps(
+                {"sentences": [{"text": GROUNDED_ANSWER, "evidence": ["E1"]}]},
+                ensure_ascii=False,
+            ),
+            "guard": '{"allow": true}',
+        }
 
         class FakeLlama:
             def create_chat_completion(self, **kwargs) -> dict:
@@ -396,21 +411,20 @@ class DemoPipelineTests(unittest.TestCase):
                     active += 1
                     peak = max(peak, active)
                 time.sleep(0.03)
-                # Only the answer composition is constrained by a JSON schema;
-                # the guards return a bare verdict.
-                kind = "answer" if "response_format" in kwargs else "guard"
+                # The admission gate asks for a task label, only the answer
+                # composition is constrained by a JSON schema, and the output
+                # guard returns an allow verdict.
+                system = kwargs["messages"][0]["content"]
+                if '{"task":"music_question"}' in system:
+                    kind = "admission"
+                elif "response_format" in kwargs:
+                    kind = "answer"
+                else:
+                    kind = "guard"
                 with counter_lock:
                     active -= 1
                     completions[kind] += 1
-                content = (
-                    json.dumps(
-                        {"sentences": [{"text": GROUNDED_ANSWER, "evidence": ["E1"]}]},
-                        ensure_ascii=False,
-                    )
-                    if kind == "answer"
-                    else '{"allow": true}'
-                )
-                return {"choices": [{"message": {"content": content}}]}
+                return {"choices": [{"message": {"content": replies[kind]}}]}
 
         def ask_once() -> dict:
             return qa.ask(
@@ -427,7 +441,7 @@ class DemoPipelineTests(unittest.TestCase):
             results = list(executor.map(lambda _: ask_once(), range(2)))
 
         self.assertEqual(peak, 1)
-        self.assertEqual(completions, {"answer": 2, "guard": 4})
+        self.assertEqual(completions, {"admission": 2, "answer": 2, "guard": 2})
         self.assertTrue(
             all(result["generation_mode"] == "llm" for result in results)
         )
