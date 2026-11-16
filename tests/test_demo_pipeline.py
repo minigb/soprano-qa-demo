@@ -169,11 +169,11 @@ class DemoPipelineTests(unittest.TestCase):
         self.assertEqual(result["evidence"][0]["id"], SECOND_BEAT_ACCENT_UNIT_ID)
         self.assertIn("송어가 뛰어노는 모습", result["answer"])
 
-    def test_generation_runs_context_and_citation_pipeline(self) -> None:
+    def test_generation_sends_question_and_evidence_in_one_call(self) -> None:
         with mock.patch.object(
             qa,
             "generate_llm",
-            return_value=f"{GROUNDED_ANSWER} [E1]",
+            return_value=GROUNDED_ANSWER,
         ) as generate:
             result = qa.ask(
                 piece_id="die-forelle",
@@ -187,23 +187,18 @@ class DemoPipelineTests(unittest.TestCase):
             qa.SETTINGS["llm"],
         )
         generate.assert_called_once()
+        self.assertEqual(generate.call_args.kwargs, {})
         prompt = generate.call_args.args[1][1]["content"]
-        # The question and evidence travel as JSON data, and the same bundle
-        # is handed to the backend's admission and output guards.
+        # The question, evidence and score lyrics travel as JSON data.
         payload = json.loads(prompt)
-        self.assertEqual(generate.call_args.kwargs["security_context"], payload)
-        first_evidence = payload["Retrieved evidence"][0]
-        self.assertEqual(first_evidence["citation_label"], "E1")
-        self.assertIn("긴장감과 분위기 전환", first_evidence["answer"])
+        self.assertEqual(payload["question"], MOOD_QUERY)
+        self.assertIn("긴장감과 분위기 전환", payload["Retrieved evidence"][0]["answer"])
         self.assertIn(MOOD_LYRIC, prompt)
-        self.assertEqual(result["generation_mode"], "llm")
+        self.assertEqual(result["generation_mode"], "llm_single_pass")
         self.assertEqual(result["answer_basis"], "retrieved_evidence")
         self.assertIsNone(result["generation_validation_warning"])
         self.assertEqual(result["evidence"][0]["id"], MOOD_UNIT_ID)
-        # Temporary [E#] labels are validated and removed; record IDs are
-        # never printed in the answer.
         self.assertEqual(result["answer"], GROUNDED_ANSWER)
-        self.assertNotIn(MOOD_UNIT_ID, result["answer"])
 
     def test_no_hit_retrieval_reports_no_corpus_evidence(self) -> None:
         result = qa.ask(
@@ -252,42 +247,7 @@ class DemoPipelineTests(unittest.TestCase):
             qa.NO_CORPUS_EVIDENCE_MESSAGE,
         )
 
-    def assertDraftWithheld(self, result: dict) -> None:
-        # When the grounded draft and the general-knowledge retry both fail,
-        # the service returns its retry guidance with no evidence.
-        self.assertEqual(result["generation_mode"], "response_error")
-        self.assertEqual(result["unavailable_reason"], "answer_validation_failed")
-        self.assertEqual(result["answer"], failure_guidance("ko"))
-        self.assertEqual(result["evidence"], [])
-
-    def assertGeneralRetryAfterGroundedDraft(self, generate: mock.Mock) -> None:
-        # A rejected grounded draft gets one general-knowledge attempt,
-        # which is given no sources.
-        self.assertEqual(generate.call_count, 2)
-        grounded, general = generate.call_args_list
-        self.assertIn("Retrieved evidence", grounded.args[1][1]["content"])
-        self.assertIs(general.kwargs.get("general_answer_fallback"), True)
-        self.assertIn('"Retrieved evidence": []', general.args[1][1]["content"])
-
-    def test_grounded_refusal_is_rejected_not_displayed(self) -> None:
-        refusal = "제공된 근거만으로는 이 질문에 정확히 답변할 수 없습니다."
-        with mock.patch.object(
-            qa,
-            "generate_llm",
-            return_value=refusal,
-        ) as generate:
-            result = qa.ask(
-                piece_id="die-forelle",
-                question=MOOD_QUERY,
-                measure_range=(28, 30),
-                generate=True,
-            )
-
-        self.assertGeneralRetryAfterGroundedDraft(generate)
-        self.assertDraftWithheld(result)
-        self.assertNotIn(refusal, result["answer"])
-
-    def test_empty_grounded_draft_is_rejected(self) -> None:
+    def test_empty_draft_is_a_service_error_after_one_call(self) -> None:
         with mock.patch.object(
             qa,
             "generate_llm",
@@ -300,18 +260,17 @@ class DemoPipelineTests(unittest.TestCase):
                 generate=True,
             )
 
-        self.assertGeneralRetryAfterGroundedDraft(generate)
-        self.assertDraftWithheld(result)
+        generate.assert_called_once()
+        self.assertEqual(result["generation_mode"], "response_error")
+        self.assertEqual(result["answer_basis"], "service_status")
+        self.assertEqual(result["answer"], failure_guidance("ko"))
 
-    def test_grounded_secondary_limitation_does_not_trigger_internal_retry(self) -> None:
-        with mock.patch.object(
-            qa,
-            "generate_llm",
-            return_value=(
-                "제공된 근거로는 판본 정보가 부족하지만, 28마디의 "
-                "분위기 변화는 어둡게 표현합니다. [E1]"
-            ),
-        ) as generate:
+    def test_answer_is_delivered_as_written_without_review(self) -> None:
+        written = (
+            "제공된 근거로는 판본 정보가 부족하지만, 28마디의 "
+            "분위기 변화는 어둡게 표현합니다."
+        )
+        with mock.patch.object(qa, "generate_llm", return_value=written) as generate:
             result = qa.ask(
                 piece_id="die-forelle",
                 question=MOOD_QUERY,
@@ -320,12 +279,10 @@ class DemoPipelineTests(unittest.TestCase):
             )
 
         generate.assert_called_once()
-        self.assertEqual(result["generation_mode"], "llm")
+        self.assertEqual(result["generation_mode"], "llm_single_pass")
         self.assertEqual(result["answer_basis"], "retrieved_evidence")
         self.assertTrue(result["evidence"])
-        self.assertIn("분위기 변화는 어둡게 표현합니다.", result["answer"])
-        self.assertNotIn("[E1]", result["answer"])
-        self.assertNotIn(MOOD_UNIT_ID, result["answer"])
+        self.assertEqual(result["answer"], written)
 
     def test_unavailable_generation_backend_fails_before_retrieval(self) -> None:
         failure = GenerationBackendUnavailable("checkpoint missing")
@@ -388,43 +345,24 @@ class DemoPipelineTests(unittest.TestCase):
         generate.assert_called_once()
 
     def test_concurrent_generation_is_serialized(self) -> None:
-        # Exercise the pipeline's real generate(), with its admission and
-        # output guards, and its inference lock; only the llama.cpp model
-        # object is replaced. Each completion holds the lock on its own.
+        # Exercise the pipeline's real generate() and its inference lock; only
+        # the llama.cpp model object is replaced. Each answer is one call.
         counter_lock = threading.Lock()
         active = 0
         peak = 0
-        completions = {"admission": 0, "answer": 0, "guard": 0}
-        replies = {
-            "admission": '{"task": "music_question"}',
-            "answer": json.dumps(
-                {"sentences": [{"text": GROUNDED_ANSWER, "evidence": ["E1"]}]},
-                ensure_ascii=False,
-            ),
-            "guard": '{"allow": true}',
-        }
+        completions = 0
 
         class FakeLlama:
             def create_chat_completion(self, **kwargs) -> dict:
-                nonlocal active, peak
+                nonlocal active, peak, completions
                 with counter_lock:
                     active += 1
                     peak = max(peak, active)
                 time.sleep(0.03)
-                # The admission gate asks for a task label, only the answer
-                # composition is constrained by a JSON schema, and the output
-                # guard returns an allow verdict.
-                system = kwargs["messages"][0]["content"]
-                if '{"task":"music_question"}' in system:
-                    kind = "admission"
-                elif "response_format" in kwargs:
-                    kind = "answer"
-                else:
-                    kind = "guard"
                 with counter_lock:
                     active -= 1
-                    completions[kind] += 1
-                return {"choices": [{"message": {"content": replies[kind]}}]}
+                    completions += 1
+                return {"choices": [{"message": {"content": GROUNDED_ANSWER}}]}
 
         def ask_once() -> dict:
             return qa.ask(
@@ -441,9 +379,9 @@ class DemoPipelineTests(unittest.TestCase):
             results = list(executor.map(lambda _: ask_once(), range(2)))
 
         self.assertEqual(peak, 1)
-        self.assertEqual(completions, {"admission": 2, "answer": 2, "guard": 2})
+        self.assertEqual(completions, 2)
         self.assertTrue(
-            all(result["generation_mode"] == "llm" for result in results)
+            all(result["generation_mode"] == "llm_single_pass" for result in results)
         )
 
     def test_web_results_keep_deterministic_rights_notices(self) -> None:

@@ -10,7 +10,6 @@ from urllib.request import Request, urlopen
 
 import server
 from server import Handler, ThreadingHTTPServer
-from soprano_qa.answer import GeneratedAnswerRejected
 from soprano_qa.dense import DenseRetrievalUnavailable
 from soprano_qa.llm import GenerationBackendUnavailable
 
@@ -65,13 +64,13 @@ class DemoServerTests(unittest.TestCase):
                     "request body must be a JSON object",
                 )
 
-    def test_demo_labels_internal_knowledge_answers(self) -> None:
+    def test_demo_labels_each_kind_of_answer(self) -> None:
         with urlopen(self.base_url + "/static/app.js", timeout=10) as response:
             script = response.read().decode("utf-8")
 
-        self.assertIn("LLM · internal knowledge", script)
-        self.assertIn("LLM unavailable", script)
-        self.assertIn("No matching corpus evidence was used.", script)
+        for label in ("LLM · with sources", "General music explanation",
+                      "Score lyrics only", "Outside music scope", "Answer unavailable"):
+            self.assertIn(label, script)
 
     def test_http_endpoint_uses_pipeline_retrieval(self) -> None:
         status, result = self.post_raw(
@@ -146,12 +145,13 @@ class DemoServerTests(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertEqual(result["error"], str(failure))
 
-    def test_rejected_generated_draft_is_bad_gateway(self) -> None:
-        failure = GeneratedAnswerRejected("Grounded model returned no usable answer")
-        with mock.patch.object(server.qa, "ask", side_effect=failure):
+    def test_answer_model_failure_is_service_unavailable(self) -> None:
+        from soprano_qa.llm import GenerationFailed
+
+        with mock.patch.object(server.qa, "ask", side_effect=GenerationFailed("timeout")):
             status, result = self.post_raw(self.ask_body())
-        self.assertEqual(status, 502)
-        self.assertIn(str(failure), result["error"])
+        self.assertEqual(status, 503)
+        self.assertEqual(result["error"], server.REMOTE_MODEL_UNAVAILABLE)
 
     def test_question_measures_outside_selection_are_client_errors(self) -> None:
         with mock.patch.object(server.qa, "ask") as ask:
