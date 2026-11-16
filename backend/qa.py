@@ -32,9 +32,8 @@ if pipeline_path not in sys.path:
     sys.path.insert(0, pipeline_path)
 
 from soprano_qa import service as SERVICE  # noqa: E402
-from soprano_qa.answer import GeneratedAnswerRejected  # noqa: E402
 from soprano_qa.dense import DenseRetrievalUnavailable  # noqa: E402
-from soprano_qa.llm import GenerationBackendUnavailable  # noqa: E402
+from soprano_qa.llm import GenerationBackendUnavailable, GenerationFailed  # noqa: E402
 from soprano_qa.retrieval import validate_question_measure_contract  # noqa: E402
 
 
@@ -43,17 +42,19 @@ ask = SERVICE.ask
 corpus_stats = SERVICE.corpus_stats
 model_status = SERVICE.model_status
 
-# The service fails closed instead of degrading to extraction or internal
-# model knowledge: a missing retrieval or generation backend raises before
-# corpus work, and an unusable grounded draft raises after its one call.
+# A missing retrieval or generation backend raises before corpus work.
 BACKEND_UNAVAILABLE_ERRORS = (
     DenseRetrievalUnavailable,
     GenerationBackendUnavailable,
 )
 
+# A reachable answer model that returned no usable answer: a remote model's
+# error, timeout or incomplete answer.
+GENERATION_FAILED_ERRORS = (GenerationFailed,)
+
 __all__ = [
     "BACKEND_UNAVAILABLE_ERRORS",
-    "GeneratedAnswerRejected",
+    "GENERATION_FAILED_ERRORS",
     "PIPELINE_ROOT",
     "SETTINGS",
     "SERVICE",

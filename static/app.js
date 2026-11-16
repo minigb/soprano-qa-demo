@@ -673,6 +673,12 @@ function renderScoreContext(scoreContext) {
   return box;
 }
 
+function answerWasWithheld(result) {
+  // The extractive path withholds text that would expose internal metadata.
+  return result.answer_basis === "no_corpus_evidence" &&
+    result.unavailable_reason === "forbidden_internal_metadata";
+}
+
 function renderQAItem(question, result) {
   const item = document.createElement("div");
   item.className = "qa-item";
@@ -684,34 +690,36 @@ function renderQAItem(question, result) {
 
   const meta = document.createElement("div");
   meta.className = "qa-meta";
-  const usesInternalKnowledge = result.answer_basis === "internal_knowledge";
-  const generationUnavailable = result.answer_basis === "generation_unavailable";
-  const noCorpusEvidence = result.answer_basis === "no_corpus_evidence";
-  const scoreContextOnly = result.answer_basis === "score_context";
+  const answerWithheld = answerWasWithheld(result);
+  // One answer call over the retrieved sources (llm_single_pass), fixed
+  // guidance (service_scope / service_status), or the extractive path.
   let modeLabel = "Retrieval (extractive)";
   let modeClass = "mode-extractive";
-  if (usesInternalKnowledge) {
-    modeLabel = "LLM · internal knowledge";
-    modeClass = "mode-internal";
-  } else if (generationUnavailable) {
-    modeLabel = "LLM unavailable";
-    modeClass = "mode-unavailable";
-  } else if (scoreContextOnly) {
+  if (result.answer_basis === "score_context") {
     modeLabel = "Score lyrics only";
     modeClass = "mode-score";
-  } else if (noCorpusEvidence) {
-    modeLabel = "No corpus match";
+  } else if (result.answer_basis === "no_corpus_evidence") {
+    modeLabel = answerWithheld ? "Answer unavailable" : "No corpus match";
     modeClass = "mode-unavailable";
-  } else if (result.generation_mode === "llm") {
-    modeLabel = "LLM · corpus-grounded";
+  } else if (result.answer_basis === "general_music_knowledge") {
+    modeLabel = "General music explanation";
+    modeClass = "mode-llm";
+  } else if (result.answer_basis === "service_scope") {
+    modeLabel = "Outside music scope";
+    modeClass = "mode-unavailable";
+  } else if (result.answer_basis === "service_status") {
+    modeLabel = "Answer unavailable";
+    modeClass = "mode-unavailable";
+  } else if (result.generation_mode === "llm_single_pass") {
+    modeLabel = "LLM · with sources";
     modeClass = "mode-llm";
   }
   const modeTag = makeTag(
     modeLabel,
     modeClass
   );
-  if (result.generation_fallback_reason) {
-    modeTag.title = result.generation_fallback_reason;
+  if (answerWithheld) {
+    modeTag.title = "Could not produce a verified answer.";
   }
   meta.appendChild(modeTag);
   meta.appendChild(makeTag("Soprano QA pipeline", "pipeline"));
@@ -733,7 +741,7 @@ function renderQAItem(question, result) {
   }
   item.appendChild(meta);
 
-  if (scoreContextOnly) {
+  if (result.answer_basis === "score_context") {
     const badge = document.createElement("div");
     badge.className = "qa-caveat qa-score-only";
     badge.textContent = SCORE_CONTEXT_NOTICE + ".";
@@ -744,15 +752,6 @@ function renderQAItem(question, result) {
   ans.className = "qa-answer";
   ans.textContent = result.answer;
   item.appendChild(ans);
-
-  if (usesInternalKnowledge) {
-    const caveat = document.createElement("div");
-    caveat.className = "qa-caveat";
-    caveat.textContent =
-      "No matching corpus evidence was used. This answer comes from the local LLM's " +
-      "internal knowledge, so score-, edition-, and measure-specific details may be inaccurate.";
-    item.appendChild(caveat);
-  }
 
   if (result.score_context && (result.score_context.measures || []).length) {
     item.appendChild(renderScoreContext(result.score_context));
@@ -1013,6 +1012,12 @@ function applyExampleQuestion(example) {
     updateRangeHighlight();
     const firstBox = state.measureBoxes.get(example.range[0]);
     if (firstBox) firstBox.scrollIntoView({ behavior: "smooth", block: "center" });
+  } else if (!example.range) {
+    // A whole-piece question replaces the range an earlier example selected.
+    state.range = null;
+    state.rangeAnchor = null;
+    updateRangeInputsFromState();
+    updateRangeHighlight();
   }
   const scope = example.range && state.range ? "range" : "whole";
   const radio = document.querySelector(`input[name="scope"][value="${scope}"]`);
